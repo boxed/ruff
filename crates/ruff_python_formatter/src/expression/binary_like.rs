@@ -19,6 +19,7 @@ use crate::expression::parentheses::{
     is_expression_parenthesized, write_in_parentheses_only_group_end_tag,
     write_in_parentheses_only_group_start_tag,
 };
+use crate::other::commas::has_skip_line_joining_line_break;
 use crate::prelude::*;
 use crate::string::implicit::FormatImplicitConcatenatedString;
 
@@ -278,6 +279,14 @@ impl<'a> BinaryLike<'a> {
     const fn is_bool_op(self) -> bool {
         matches!(self, BinaryLike::Bool(_))
     }
+
+    fn range(self) -> TextRange {
+        match self {
+            BinaryLike::Binary(expr) => expr.range(),
+            BinaryLike::Compare(expr) => expr.range(),
+            BinaryLike::Bool(expr) => expr.range(),
+        }
+    }
 }
 
 impl Format<PyFormatContext<'_>> for BinaryLike<'_> {
@@ -285,8 +294,22 @@ impl Format<PyFormatContext<'_>> for BinaryLike<'_> {
         let comments = f.context().comments().clone();
         let flat_binary = self.flatten(&comments, f.context().source());
 
+        // Check if we should preserve line breaks when skip-line-joining is enabled
+        let has_source_line_break = has_skip_line_joining_line_break(self.range(), f.context());
+
         if self.is_bool_op() {
-            return in_parentheses_only_group(&&*flat_binary).fmt(f);
+            // If there are line breaks in the source and skip-line-joining is enabled,
+            // include expand_parent() inside the group to force the group itself to expand
+            in_parentheses_only_group(&format_with(|f| {
+                flat_binary.fmt(f)?;
+                if has_source_line_break {
+                    expand_parent().fmt(f)?;
+                }
+                Ok(())
+            }))
+            .fmt(f)?;
+
+            return Ok(());
         }
 
         let source = f.context().source();
@@ -481,7 +504,16 @@ impl Format<PyFormatContext<'_>> for BinaryLike<'_> {
             // Finish the group that wraps all implicit concatenated strings
             write_in_parentheses_only_group_end_tag(f);
         } else {
-            in_parentheses_only_group(&&*flat_binary).fmt(f)?;
+            // If there are line breaks in the source and skip-line-joining is enabled,
+            // include expand_parent() inside the group to force the group itself to expand
+            in_parentheses_only_group(&format_with(|f| {
+                flat_binary.fmt(f)?;
+                if has_source_line_break {
+                    expand_parent().fmt(f)?;
+                }
+                Ok(())
+            }))
+            .fmt(f)?;
         }
 
         Ok(())
