@@ -143,3 +143,25 @@ result = (
     + second_value
     + third_value
 )
+
+
+# Ternary expression on multiple lines
+value = (
+    some_long_value
+    if condition
+    else other_value
+)
+
+
+# Ternary expression on single line stays single line
+value2 = x if y else z
+
+
+# Chained ternary expression on multiple lines
+clone._iterable_class = (
+    NamedValuesListIterable
+    if named
+    else FlatValuesListIterable
+    if flat
+    else ValuesListIterable
+)

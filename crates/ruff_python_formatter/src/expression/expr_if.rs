@@ -1,12 +1,14 @@
 use ruff_formatter::{FormatRuleWithOptions, write};
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::{Expr, ExprIf};
+use ruff_text_size::Ranged;
 
 use crate::comments::leading_comments;
 use crate::expression::parentheses::{
     NeedsParentheses, OptionalParentheses, in_parentheses_only_group,
     in_parentheses_only_soft_line_break_or_space, is_expression_parenthesized,
 };
+use crate::other::commas::has_skip_line_joining_line_break;
 use crate::prelude::*;
 
 #[derive(Default, Copy, Clone)]
@@ -77,7 +79,22 @@ impl FormatNodeRule<ExprIf> for FormatExprIf {
         });
 
         match self.layout {
-            ExprIfLayout::Default => in_parentheses_only_group(&inner).fmt(f),
+            ExprIfLayout::Default => {
+                // Check if we should preserve line breaks when skip-line-joining is enabled
+                let has_source_line_break =
+                    has_skip_line_joining_line_break(item.range(), f.context());
+
+                // If there are line breaks in the source and skip-line-joining is enabled,
+                // include expand_parent() inside the group to force the group itself to expand
+                in_parentheses_only_group(&format_with(|f| {
+                    inner.fmt(f)?;
+                    if has_source_line_break {
+                        expand_parent().fmt(f)?;
+                    }
+                    Ok(())
+                }))
+                .fmt(f)
+            }
             ExprIfLayout::Nested => inner.fmt(f),
         }
     }
