@@ -11,8 +11,8 @@ use ruff_linter::settings::types::{
 use ruff_macros::CacheKey;
 use ruff_python_ast::{PySourceType, PythonVersion};
 use ruff_python_formatter::{
-    DocstringCode, DocstringCodeLineWidth, MagicTrailingComma, PreviewMode, PyFormatOptions,
-    QuoteStyle,
+    DocstringCode, DocstringCodeLineWidth, LineJoining, MagicTrailingComma, PreviewMode,
+    PyFormatOptions, QuoteStyle,
 };
 use ruff_source_file::find_newline;
 use std::fmt;
@@ -196,6 +196,8 @@ pub struct FormatterSettings {
 
     pub docstring_code_format: DocstringCode,
     pub docstring_code_line_width: DocstringCodeLineWidth,
+
+    pub line_joining: LineJoining,
 }
 
 impl FormatterSettings {
@@ -241,6 +243,7 @@ impl FormatterSettings {
             .with_line_width(self.line_width)
             .with_docstring_code(self.docstring_code_format)
             .with_docstring_code_line_width(self.docstring_code_line_width)
+            .with_line_joining(self.line_joining)
     }
 
     /// Resolve the [`PythonVersion`] to use for formatting.
@@ -273,6 +276,7 @@ impl Default for FormatterSettings {
             magic_trailing_comma: default_options.magic_trailing_comma(),
             docstring_code_format: default_options.docstring_code(),
             docstring_code_line_width: default_options.docstring_code_line_width(),
+            line_joining: default_options.line_joining(),
         }
     }
 }
@@ -296,6 +300,7 @@ impl fmt::Display for FormatterSettings {
                 self.magic_trailing_comma,
                 self.docstring_code_format,
                 self.docstring_code_line_width,
+                self.line_joining,
             ]
         }
         Ok(())

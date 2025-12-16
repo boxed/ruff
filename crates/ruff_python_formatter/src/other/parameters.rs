@@ -9,6 +9,7 @@ use crate::comments::{
 };
 use crate::context::{NodeLevel, WithNodeLevel};
 use crate::expression::parentheses::empty_parenthesized;
+use crate::other::commas::has_skip_line_joining_line_break;
 use crate::prelude::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
@@ -227,10 +228,16 @@ impl FormatNodeRule<Parameters> for FormatParameters {
             } else {
                 write!(f, [if_group_breaks(&token(","))])?;
 
-                if f.options().magic_trailing_comma().is_respect()
-                    && has_trailing_comma(item, last_node, f.context().source())
-                {
-                    // Make the magic trailing comma expand the group
+                let has_magic_trailing_comma = f.options().magic_trailing_comma().is_respect()
+                    && has_trailing_comma(item, last_node, f.context().source());
+
+                // Check if there are line breaks in the source and line joining is disabled.
+                // If the parameters span multiple lines in the source, preserve that.
+                let has_source_line_break =
+                    has_skip_line_joining_line_break(item.range(), f.context());
+
+                if has_magic_trailing_comma || has_source_line_break {
+                    // Make the magic trailing comma or source line break expand the group
                     write!(f, [hard_line_break()])?;
                 }
             }

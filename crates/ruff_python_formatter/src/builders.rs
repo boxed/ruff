@@ -2,7 +2,7 @@ use ruff_formatter::{Argument, Arguments, format_args, write};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::context::{NodeLevel, WithNodeLevel};
-use crate::other::commas::has_magic_trailing_comma;
+use crate::other::commas::{has_magic_trailing_comma, has_skip_line_joining_line_break};
 use crate::prelude::*;
 
 /// Adds parentheses and indents `content` if it doesn't fit on a line.
@@ -129,6 +129,8 @@ pub(crate) struct JoinCommaSeparatedBuilder<'fmt, 'ast, 'buf> {
     entries: Entries,
     sequence_end: TextSize,
     trailing_comma: TrailingComma,
+    /// The start position of the first entry, used for detecting line breaks in the source
+    first_entry_start: Option<TextSize>,
 }
 
 impl<'fmt, 'ast, 'buf> JoinCommaSeparatedBuilder<'fmt, 'ast, 'buf> {
@@ -139,6 +141,7 @@ impl<'fmt, 'ast, 'buf> JoinCommaSeparatedBuilder<'fmt, 'ast, 'buf> {
             entries: Entries::None,
             sequence_end,
             trailing_comma: TrailingComma::default(),
+            first_entry_start: None,
         }
     }
 
@@ -175,6 +178,9 @@ impl<'fmt, 'ast, 'buf> JoinCommaSeparatedBuilder<'fmt, 'ast, 'buf> {
         self.result = self.result.and_then(|()| {
             if self.entries.is_one_or_more() {
                 write!(self.fmt, [token(","), separator])?;
+            } else {
+                // Track the start of the first entry
+                self.first_entry_start = Some(node.start());
             }
 
             self.entries = self.entries.next(node.end());
@@ -232,16 +238,27 @@ impl<'fmt, 'ast, 'buf> JoinCommaSeparatedBuilder<'fmt, 'ast, 'buf> {
                     self.fmt.context(),
                 );
 
+                // Check if there are line breaks in the source and line joining is disabled.
+                // Only check if there are multiple entries, as single entries don't need expansion.
+                let has_source_line_break = self.entries.is_more_than_one()
+                    && self.first_entry_start.is_some_and(|start| {
+                        has_skip_line_joining_line_break(
+                            TextRange::new(start, self.sequence_end),
+                            self.fmt.context(),
+                        )
+                    });
+
                 // If there is a single entry, only keep the magic trailing comma, don't add it if
                 // it wasn't there -- unless the trailing comma behavior is set to one-or-more.
                 if magic_trailing_comma
+                    || has_source_line_break
                     || self.trailing_comma == TrailingComma::OneOrMore
                     || self.entries.is_more_than_one()
                 {
                     if_group_breaks(&token(",")).fmt(self.fmt)?;
                 }
 
-                if magic_trailing_comma {
+                if magic_trailing_comma || has_source_line_break {
                     expand_parent().fmt(self.fmt)?;
                 }
             }

@@ -1,8 +1,10 @@
 use ruff_formatter::{FormatResult, format_args, write};
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::ExprListComp;
+use ruff_text_size::Ranged;
 
 use crate::expression::parentheses::{NeedsParentheses, OptionalParentheses, parenthesized};
+use crate::other::commas::has_skip_line_joining_line_break;
 use crate::prelude::*;
 
 #[derive(Default)]
@@ -26,6 +28,9 @@ impl FormatNodeRule<ExprListComp> for FormatExprListComp {
         let comments = f.context().comments().clone();
         let dangling = comments.dangling(item);
 
+        // Check if there are line breaks in the source and line joining is disabled.
+        let has_source_line_break = has_skip_line_joining_line_break(item.range(), f.context());
+
         write!(
             f,
             [parenthesized(
@@ -33,7 +38,8 @@ impl FormatNodeRule<ExprListComp> for FormatExprListComp {
                 &group(&format_args![
                     group(&elt.format()),
                     soft_line_break_or_space(),
-                    joined
+                    joined,
+                    has_source_line_break.then_some(expand_parent())
                 ]),
                 "]"
             )

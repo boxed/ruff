@@ -1,10 +1,11 @@
-use ruff_formatter::write;
+use ruff_formatter::{format_args, write};
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::ExprDictComp;
 use ruff_text_size::Ranged;
 
 use crate::comments::dangling_comments;
 use crate::expression::parentheses::{NeedsParentheses, OptionalParentheses, parenthesized};
+use crate::other::commas::has_skip_line_joining_line_break;
 use crate::prelude::*;
 
 #[derive(Default)]
@@ -35,25 +36,31 @@ impl FormatNodeRule<ExprDictComp> for FormatExprDictComp {
         let (open_parenthesis_comments, key_value_comments) =
             dangling.split_at(dangling.partition_point(|comment| comment.end() < key.start()));
 
+        // Check if there are line breaks in the source and line joining is disabled.
+        let has_source_line_break = has_skip_line_joining_line_break(item.range(), f.context());
+
         write!(
             f,
             [parenthesized(
                 "{",
-                &group(&format_with(|f| {
-                    write!(f, [group(&key.format()), token(":")])?;
+                &group(&format_args!(
+                    format_with(|f| {
+                        write!(f, [group(&key.format()), token(":")])?;
 
-                    if key_value_comments.is_empty() {
-                        space().fmt(f)?;
-                    } else {
-                        dangling_comments(key_value_comments).fmt(f)?;
-                    }
+                        if key_value_comments.is_empty() {
+                            space().fmt(f)?;
+                        } else {
+                            dangling_comments(key_value_comments).fmt(f)?;
+                        }
 
-                    write!(f, [value.format(), soft_line_break_or_space()])?;
+                        write!(f, [value.format(), soft_line_break_or_space()])?;
 
-                    f.join_with(soft_line_break_or_space())
-                        .entries(generators.iter().formatted())
-                        .finish()
-                })),
+                        f.join_with(soft_line_break_or_space())
+                            .entries(generators.iter().formatted())
+                            .finish()
+                    }),
+                    has_source_line_break.then_some(expand_parent())
+                )),
                 "}"
             )
             .with_dangling_comments(open_parenthesis_comments)]

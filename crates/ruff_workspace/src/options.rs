@@ -3805,6 +3805,42 @@ pub struct FormatOptions {
         "#
     )]
     pub docstring_code_line_length: Option<DocstringCodeLineWidth>,
+
+    /// If set to `true`, the formatter will never join lines that were originally
+    /// on separate lines, even if they would fit within the line length limit.
+    ///
+    /// For example, with `skip-line-joining = false` (the default), the formatter
+    /// will collapse the following code:
+    ///
+    /// ```python
+    /// def test(
+    ///     a,
+    ///     b,
+    /// ): pass
+    /// ```
+    ///
+    /// To:
+    ///
+    /// ```python
+    /// def test(a, b):
+    ///     pass
+    /// ```
+    ///
+    /// Setting `skip-line-joining = true` preserves the original line breaks:
+    ///
+    /// ```python
+    /// def test(
+    ///     a,
+    ///     b,
+    /// ):
+    ///     pass
+    /// ```
+    #[option(
+        default = r#"false"#,
+        value_type = r#"bool"#,
+        example = "skip-line-joining = true"
+    )]
+    pub skip_line_joining: Option<bool>,
 }
 
 /// Configures Ruff's `analyze` command.

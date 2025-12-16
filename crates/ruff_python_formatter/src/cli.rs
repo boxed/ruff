@@ -12,7 +12,7 @@ use ruff_python_trivia::CommentRanges;
 use ruff_text_size::Ranged;
 
 use crate::comments::collect_comments;
-use crate::{MagicTrailingComma, PreviewMode, PyFormatOptions, format_module_ast};
+use crate::{LineJoining, MagicTrailingComma, PreviewMode, PyFormatOptions, format_module_ast};
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum Emit {
@@ -42,6 +42,8 @@ pub struct Cli {
     pub print_comments: bool,
     #[clap(long, short = 'C')]
     pub skip_magic_trailing_comma: bool,
+    #[clap(long, short = 'J')]
+    pub skip_line_joining: bool,
     #[clap(long)]
     pub target_version: PythonVersion,
 }
@@ -66,6 +68,11 @@ pub fn format_and_debug_print(source: &str, cli: &Cli, source_path: &Path) -> Re
             MagicTrailingComma::Ignore
         } else {
             MagicTrailingComma::Respect
+        })
+        .with_line_joining(if cli.skip_line_joining {
+            LineJoining::Disabled
+        } else {
+            LineJoining::Enabled
         })
         .with_target_version(cli.target_version);
 
