@@ -14,6 +14,9 @@ pub struct PrinterOptions {
 
     /// The type of line ending to apply to the printed input
     pub line_ending: LineEnding,
+
+    /// Whether to join lines that fit within the line width limit.
+    pub line_joining: LineJoining,
 }
 
 impl<'a, O> From<&'a O> for PrinterOptions
@@ -45,6 +48,12 @@ impl PrinterOptions {
     pub fn with_tab_width(mut self, width: IndentWidth) -> Self {
         self.indent_width = width;
 
+        self
+    }
+
+    #[must_use]
+    pub fn with_line_joining(mut self, line_joining: LineJoining) -> Self {
+        self.line_joining = line_joining;
         self
     }
 
@@ -149,6 +158,38 @@ impl LineEnding {
             LineEnding::LineFeed => "lf",
             LineEnding::CarriageReturnLineFeed => "crlf",
             LineEnding::CarriageReturn => "cr",
+        }
+    }
+}
+
+/// Controls whether the formatter joins lines that fit within the line width limit.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+pub enum LineJoining {
+    /// Join lines that fit within the line width limit (default behavior).
+    #[default]
+    Enabled,
+
+    /// Never join lines, always preserve line breaks.
+    Disabled,
+}
+
+impl LineJoining {
+    pub const fn is_enabled(self) -> bool {
+        matches!(self, LineJoining::Enabled)
+    }
+
+    pub const fn is_disabled(self) -> bool {
+        matches!(self, LineJoining::Disabled)
+    }
+}
+
+impl std::fmt::Display for LineJoining {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LineJoining::Enabled => write!(f, "enabled"),
+            LineJoining::Disabled => write!(f, "disabled"),
         }
     }
 }

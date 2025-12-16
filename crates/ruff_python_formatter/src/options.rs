@@ -69,6 +69,9 @@ pub struct PyFormatOptions {
     /// inside interpolated string expressions. When set to `preferred`, Ruff will use
     /// the configured `quote-style`.
     nested_string_quote_style: NestedStringQuoteStyle,
+
+    /// Whether to join lines that fit within the line width limit.
+    line_joining: LineJoining,
 }
 
 fn default_line_width() -> LineWidth {
@@ -99,6 +102,7 @@ impl Default for PyFormatOptions {
             docstring_code_line_width: DocstringCodeLineWidth::default(),
             preview: PreviewMode::default(),
             nested_string_quote_style: NestedStringQuoteStyle::default(),
+            line_joining: LineJoining::default(),
         }
     }
 }
@@ -154,6 +158,10 @@ impl PyFormatOptions {
 
     pub const fn nested_string_quote_style(&self) -> NestedStringQuoteStyle {
         self.nested_string_quote_style
+    }
+
+    pub const fn line_joining(&self) -> LineJoining {
+        self.line_joining
     }
 
     #[must_use]
@@ -230,6 +238,12 @@ impl PyFormatOptions {
         self.source_map_generation = source_map;
         self
     }
+
+    #[must_use]
+    pub fn with_line_joining(mut self, line_joining: LineJoining) -> Self {
+        self.line_joining = line_joining;
+        self
+    }
 }
 
 impl FormatOptions for PyFormatOptions {
@@ -251,6 +265,7 @@ impl FormatOptions for PyFormatOptions {
             line_width: self.line_width,
             line_ending: self.line_ending,
             indent_style: self.indent_style,
+            line_joining: self.line_joining.into(),
         }
     }
 }
@@ -509,5 +524,49 @@ where
             serde::de::Unexpected::Str(s),
             &"dynamic",
         )),
+    }
+}
+
+/// Controls whether the formatter joins lines that fit within the line width limit.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, CacheKey)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "lowercase")
+)]
+pub enum LineJoining {
+    /// Join lines that fit within the line width limit (default behavior).
+    #[default]
+    Enabled,
+
+    /// Never join lines, always preserve line breaks.
+    Disabled,
+}
+
+impl LineJoining {
+    pub const fn is_enabled(self) -> bool {
+        matches!(self, LineJoining::Enabled)
+    }
+
+    pub const fn is_disabled(self) -> bool {
+        matches!(self, LineJoining::Disabled)
+    }
+}
+
+impl fmt::Display for LineJoining {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LineJoining::Enabled => write!(f, "enabled"),
+            LineJoining::Disabled => write!(f, "disabled"),
+        }
+    }
+}
+
+impl From<LineJoining> for ruff_formatter::printer::LineJoining {
+    fn from(line_joining: LineJoining) -> Self {
+        match line_joining {
+            LineJoining::Enabled => ruff_formatter::printer::LineJoining::Enabled,
+            LineJoining::Disabled => ruff_formatter::printer::LineJoining::Disabled,
+        }
     }
 }

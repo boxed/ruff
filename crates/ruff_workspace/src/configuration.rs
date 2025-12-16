@@ -43,7 +43,7 @@ use ruff_linter::{
 };
 use ruff_python_ast as ast;
 use ruff_python_formatter::{
-    DocstringCode, DocstringCodeLineWidth, MagicTrailingComma, QuoteStyle,
+    DocstringCode, DocstringCodeLineWidth, LineJoining, MagicTrailingComma, QuoteStyle,
 };
 
 use crate::options::{
@@ -265,6 +265,9 @@ impl Configuration {
             docstring_code_line_width: format
                 .docstring_code_line_width
                 .unwrap_or(format_defaults.docstring_code_line_width),
+            line_joining: format
+                .line_joining
+                .unwrap_or(format_defaults.line_joining),
         };
 
         let analyze = self.analyze;
@@ -1320,6 +1323,7 @@ pub struct FormatConfiguration {
     pub line_ending: Option<LineEnding>,
     pub docstring_code_format: Option<DocstringCode>,
     pub docstring_code_line_width: Option<DocstringCodeLineWidth>,
+    pub line_joining: Option<LineJoining>,
 }
 
 impl FormatConfiguration {
@@ -1357,6 +1361,13 @@ impl FormatConfiguration {
                 }
             }),
             docstring_code_line_width: options.docstring_code_line_length,
+            line_joining: options.skip_line_joining.map(|skip| {
+                if skip {
+                    LineJoining::Disabled
+                } else {
+                    LineJoining::Enabled
+                }
+            }),
         })
     }
 
@@ -1377,6 +1388,7 @@ impl FormatConfiguration {
             docstring_code_line_width: self
                 .docstring_code_line_width
                 .or(config.docstring_code_line_width),
+            line_joining: self.line_joining.or(config.line_joining),
         }
     }
 }

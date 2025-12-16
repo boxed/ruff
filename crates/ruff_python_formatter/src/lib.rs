@@ -20,7 +20,8 @@ use crate::comments::{
 pub use crate::context::PyFormatContext;
 pub use crate::db::Db;
 pub use crate::options::{
-    DocstringCode, DocstringCodeLineWidth, MagicTrailingComma, NestedStringQuoteStyle, PreviewMode,
+    DocstringCode, DocstringCodeLineWidth, LineJoining, MagicTrailingComma, NestedStringQuoteStyle,
+    PreviewMode,
     PyFormatOptions, QuoteStyle,
 };
 use crate::range::is_logical_line;
