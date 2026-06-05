@@ -18,6 +18,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::{SmallVec, smallvec_inline};
 
 use super::{DynamicType, Type, TypeVarVariance, UnionType, semantic_index};
+use crate::names_to_types::resolve_implicit_declared_type;
 use crate::types::callable::CallableTypeKind;
 use crate::types::constraints::{
     ConstraintSet, ConstraintSetBuilder, IteratorConstraintsExtension,
@@ -3905,6 +3906,17 @@ impl<'db> Parameter<'db> {
                     false,
                     annotation.is_starred_expr(),
                 )
+            } else if !matches!(
+                kind,
+                ParameterKind::Variadic { .. } | ParameterKind::KeywordVariadic { .. }
+            ) && let Some(implicit_ty) = resolve_implicit_declared_type(
+                db,
+                function_definition.file(db),
+                parameter.name.id.as_str(),
+            ) {
+                // Apply the project's `names-to-types` mapping for unannotated
+                // parameters, making `def x(foo):` behave like `def x(foo: Foo)`.
+                (implicit_ty, false, false)
             } else {
                 (Type::unknown(), true, false)
             };

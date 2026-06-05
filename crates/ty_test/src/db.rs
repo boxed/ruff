@@ -17,6 +17,8 @@ use ty_module_resolver::{ModuleGlobSetBuilder, SearchPaths};
 use ty_python_core::Db as _;
 use ty_python_core::program::Program;
 use ty_python_semantic::lint::{LintRegistry, RuleSelection};
+use ty_python_semantic::monkey_patched_attributes::MonkeyPatchedAttributesMap;
+use ty_python_semantic::names_to_types::NamesToTypesMap;
 use ty_python_semantic::{
     AnalysisSettings, Db as SemanticDb, check_file_unwrap, default_lint_registry,
 };
@@ -67,6 +69,8 @@ impl Db {
                 respect_type_ignore_comments: respect_type_ignore_comments_default,
                 allowed_unresolved_imports: allowed_unresolved_imports_default,
                 replace_imports_with_any: replace_imports_with_any_default,
+                names_to_types: names_to_types_default,
+                monkey_patched_attributes: monkey_patched_attributes_default,
             } = AnalysisSettings::default();
 
             let allowed_unresolved_imports = if let Some(allowed_unresolved_imports) =
@@ -97,12 +101,36 @@ impl Db {
                 replace_imports_with_any_default
             };
 
+            let names_to_types = if let Some(names_to_types) = options.names_to_types.as_ref() {
+                NamesToTypesMap::from_entries(
+                    names_to_types
+                        .iter()
+                        .map(|(name, ty)| (name.as_str(), ty.as_str())),
+                )
+            } else {
+                names_to_types_default
+            };
+
+            let monkey_patched_attributes = if let Some(monkey_patched_attributes) =
+                options.monkey_patched_attributes.as_ref()
+            {
+                MonkeyPatchedAttributesMap::from_entries(
+                    monkey_patched_attributes
+                        .iter()
+                        .map(|(key, ty)| (key.as_str(), ty.as_str())),
+                )
+            } else {
+                monkey_patched_attributes_default
+            };
+
             AnalysisSettings {
                 respect_type_ignore_comments: options
                     .respect_type_ignore_comments
                     .unwrap_or(respect_type_ignore_comments_default),
                 allowed_unresolved_imports,
                 replace_imports_with_any,
+                names_to_types,
+                monkey_patched_attributes,
             }
         } else {
             AnalysisSettings::default()

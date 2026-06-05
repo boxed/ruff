@@ -348,6 +348,23 @@ impl Project {
             .map(OptionDiagnostic::to_diagnostic)
             .collect();
 
+        // Validate `monkey-patched-attributes` entries here rather than at
+        // config-load time: resolving their class/type paths needs the
+        // `Program` (search paths), which is only set up by the time we check.
+        if let Some(attributes) = self
+            .metadata(db)
+            .options()
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.monkey_patched_attributes.as_ref())
+        {
+            diagnostics.extend(
+                crate::metadata::options::validate_monkey_patched_attributes(db, attributes)
+                    .iter()
+                    .map(OptionDiagnostic::to_diagnostic),
+            );
+        }
+
         let files = ProjectFiles::new(db, self);
         reporter.set_files(files.len());
 

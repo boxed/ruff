@@ -117,6 +117,12 @@ pub(crate) struct Analysis {
     pub(crate) allowed_unresolved_imports: Option<Vec<String>>,
 
     pub(crate) replace_imports_with_any: Option<Vec<String>>,
+
+    /// Implicit `name -> dotted.Type` mapping (see the `names-to-types` analysis option).
+    pub(crate) names_to_types: Option<std::collections::BTreeMap<String, String>>,
+
+    /// Per-class attribute type declarations (see the `monkey-patched-attributes` option).
+    pub(crate) monkey_patched_attributes: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

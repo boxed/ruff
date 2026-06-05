@@ -82,6 +82,28 @@
             "$ref": "#/definitions/string"
           }
         },
+        "monkey-patched-attributes": {
+          "description": "Per-class attribute type declarations for attributes that exist at\nruntime but are not visible to the type checker (e.g. attributes\ninstalled by a framework or by an explicit monkey patch).\n\nEach key has the form `module.path.Class.attribute`; the last segment\nis the attribute name and the prefix is the dotted path to the class\n(use a bare class name for builtins, e.g. `int.is_super_cool`).\n\nEach value is a type expression. Usually it is a dotted path to a class\n(the resolved type is its *instance* type), but it may also be a\n`Callable[[ArgType, ...], ReturnType]` — handy for methods that are\nmonkey-patched in. `typing.Callable`, `collections.abc.Callable`, and a\nbare `Callable` are all accepted, as is the gradual `Callable[..., R]`.\n\nWhen ty resolves `obj.attribute` and `obj` is an instance of the named\nclass (or a subclass), or the class object itself, the configured type\nwins over the normal lookup; no `unresolved-attribute` diagnostic is\nemitted even if the attribute is not declared on the class.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MonkeyPatchedAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "names-to-types": {
+          "description": "Implicit `name -> Type` mapping that declares the type of unannotated\nnames. When set, ty treats `name = value` as if the user had written\n`name: Type = value`. The mapping also applies to unannotated function\nand lambda parameters and to attribute accesses.\n\nEach value is a dotted path to a class. A bare name resolves against\n`builtins` (so `n = \"int\"` is equivalent to `n = \"builtins.int\"`).\n\nSee `docs/names-to-types.md` for the full specification.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NamesToTypes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "replace-imports-with-any": {
           "description": "A list of module glob patterns whose imports should be replaced with `typing.Any`.\n\nUnlike `allowed-unresolved-imports`, this setting replaces the module's type information\nwith `typing.Any` even if the module can be resolved. Import diagnostics are\nunconditionally suppressed for matching modules.\n\n- Prefix a pattern with `!` to exclude matching modules\n\nWhen multiple patterns match, later entries take precedence.\n\nGlob patterns can be used in combinations with each other. For example, to suppress errors for\nany module where the first component contains the substring `test`, use `*test*.**`.\n\nWhen multiple patterns match, later entries take precedence.",
           "type": [
@@ -199,6 +221,18 @@
           "const": "error"
         }
       ]
+    },
+    "MonkeyPatchedAttributes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "NamesToTypes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "OutputFormat": {
       "description": "The diagnostic output format.",

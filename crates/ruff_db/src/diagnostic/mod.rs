@@ -980,6 +980,18 @@ pub enum DiagnosticId {
     /// A glob pattern doesn't follow the expected syntax.
     InvalidGlob,
 
+    /// A `monkey-patched-attributes` entry references a class or type that
+    /// cannot be resolved, so the entry has no effect.
+    ///
+    /// ## Why is this bad?
+    /// The most common cause is a bare class name (e.g. `AnonymousUser.attr`):
+    /// the part before the last `.` must be a fully-qualified path to the class
+    /// (`myapp.models.AnonymousUser.attr`); only that resolves against
+    /// `builtins`. An entry whose class or type path cannot be resolved is
+    /// silently ignored, which usually means the attribute still reports
+    /// `unresolved-attribute`.
+    InvalidMonkeyPatchedAttribute,
+
     /// An `include` glob without any patterns.
     ///
     /// ## Why is this bad?
@@ -1108,6 +1120,7 @@ impl DiagnosticId {
             DiagnosticId::RevealedType => "revealed-type",
             DiagnosticId::UnknownRule => "unknown-rule",
             DiagnosticId::InvalidGlob => "invalid-glob",
+            DiagnosticId::InvalidMonkeyPatchedAttribute => "invalid-monkey-patched-attribute",
             DiagnosticId::EmptyInclude => "empty-include",
             DiagnosticId::UnnecessaryOverridesSection => "unnecessary-overrides-section",
             DiagnosticId::UselessOverridesSection => "useless-overrides-section",

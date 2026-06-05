@@ -205,3 +205,48 @@ fn overrides_inherit_global() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// A `monkey-patched-attributes` entry whose class path is a bare name (which
+/// only resolves against `builtins`) or whose type path can't be resolved warns
+/// that the entry is being ignored, pointing at the offending config value.
+#[test]
+fn monkey_patched_attributes_unresolvable_paths_warn() -> anyhow::Result<()> {
+    let case = CliTest::with_files([
+        (
+            "ty.toml",
+            r#"
+            [analysis.monkey-patched-attributes]
+            "AnonymousUser.has_group" = "builtins.bool"
+            "app.AnonymousUser.is_ok" = "app.NoSuchType"
+            "app.AnonymousUser.fine" = "builtins.bool"
+            "#,
+        ),
+        ("app/__init__.py", "class AnonymousUser: ...\n"),
+        ("test.py", "x = 1\n"),
+    ])?;
+
+    assert_cmd_snapshot!(case.command(), @r#"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    warning[invalid-monkey-patched-attribute]: Invalid class path
+     --> ty.toml:3:1
+      |
+    3 | "AnonymousUser.has_group" = "builtins.bool"
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^ use a fully-qualified path like `package.module.Class.attribute`; only a bare name resolves against `builtins`
+      |
+
+    warning[invalid-monkey-patched-attribute]: Invalid type path
+     --> ty.toml:4:29
+      |
+    4 | "app.AnonymousUser.is_ok" = "app.NoSuchType"
+      |                             ^^^^^^^^^^^^^^^^ expected a dotted path to a class or a `Callable[[...], ...]`; a bare name resolves against `builtins`
+      |
+
+    Found 2 diagnostics
+
+    ----- stderr -----
+    "#);
+
+    Ok(())
+}

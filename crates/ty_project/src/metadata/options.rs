@@ -37,6 +37,10 @@ use ty_module_resolver::{
 use ty_python_core::platform::PythonPlatform;
 use ty_python_core::program::{MisconfigurationStrategy, ProgramSettings};
 use ty_python_semantic::lint::{Level, LintSource, RuleSelection};
+use ty_python_semantic::monkey_patched_attributes::{
+    MonkeyPatchedAttributesMap, config_type_resolves, dotted_path_resolves,
+};
+use ty_python_semantic::names_to_types::NamesToTypesMap;
 use ty_python_semantic::{
     AnalysisSettings, PythonEnvironment, PythonVersionFileSource, PythonVersionSource,
     PythonVersionWithSource, SitePackagesPaths, SysPrefixPathOrigin,
@@ -1527,6 +1531,59 @@ pub struct AnalysisOptions {
         "#
     )]
     pub replace_imports_with_any: Option<Vec<RangedValue<String>>>,
+
+    /// Implicit `name -> Type` mapping that declares the type of unannotated
+    /// names. When set, ty treats `name = value` as if the user had written
+    /// `name: Type = value`. The mapping also applies to unannotated function
+    /// and lambda parameters and to attribute accesses.
+    ///
+    /// Each value is a dotted path to a class. A bare name resolves against
+    /// `builtins` (so `n = "int"` is equivalent to `n = "builtins.int"`).
+    ///
+    /// See `docs/names-to-types.md` for the full specification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[option(
+        default = r#"{}"#,
+        value_type = "dict[str, str]",
+        example = r#"
+            # Override framework stubs by declaring that `user` is always our `User`,
+            # and `count` is always an `int`.
+            [tool.ty.analysis.names-to-types]
+            user = "mypkg.User"
+            count = "builtins.int"
+        "#
+    )]
+    pub names_to_types: Option<NamesToTypes>,
+
+    /// Per-class attribute type declarations for attributes that exist at
+    /// runtime but are not visible to the type checker (e.g. attributes
+    /// installed by a framework or by an explicit monkey patch).
+    ///
+    /// Each key has the form `module.path.Class.attribute`; the last segment
+    /// is the attribute name and the prefix is the dotted path to the class
+    /// (use a bare class name for builtins, e.g. `int.is_super_cool`).
+    ///
+    /// Each value is a type expression. Usually it is a dotted path to a class
+    /// (the resolved type is its *instance* type), but it may also be a
+    /// `Callable[[ArgType, ...], ReturnType]` — handy for methods that are
+    /// monkey-patched in. `typing.Callable`, `collections.abc.Callable`, and a
+    /// bare `Callable` are all accepted, as is the gradual `Callable[..., R]`.
+    ///
+    /// When ty resolves `obj.attribute` and `obj` is an instance of the named
+    /// class (or a subclass), or the class object itself, the configured type
+    /// wins over the normal lookup; no `unresolved-attribute` diagnostic is
+    /// emitted even if the attribute is not declared on the class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[option(
+        default = r#"{}"#,
+        value_type = "dict[str, str]",
+        example = r#"
+            [tool.ty.analysis.monkey-patched-attributes]
+            "django.http.HttpRequest.user" = "mypkg.User"
+            "django.contrib.auth.models.AnonymousUser.has_group" = "typing.Callable[[str], bool]"
+        "#
+    )]
+    pub monkey_patched_attributes: Option<MonkeyPatchedAttributes>,
 }
 
 impl AnalysisOptions {
@@ -1539,12 +1596,16 @@ impl AnalysisOptions {
             respect_type_ignore_comments,
             allowed_unresolved_imports,
             replace_imports_with_any,
+            names_to_types,
+            monkey_patched_attributes,
         } = self;
 
         let AnalysisSettings {
             respect_type_ignore_comments: respect_type_ignore_default,
             allowed_unresolved_imports: allowed_unresolved_imports_default,
             replace_imports_with_any: replace_imports_with_any_default,
+            names_to_types: names_to_types_default,
+            monkey_patched_attributes: monkey_patched_attributes_default,
         } = AnalysisSettings::default();
 
         let allowed_unresolved_imports =
@@ -1569,13 +1630,139 @@ impl AnalysisOptions {
                 replace_imports_with_any_default
             };
 
+        let names_to_types = if let Some(names_to_types) = names_to_types {
+            NamesToTypesMap::from_entries(
+                names_to_types
+                    .inner
+                    .iter()
+                    .map(|(name, ty)| (name.as_str(), ty.as_str())),
+            )
+        } else {
+            names_to_types_default
+        };
+
+        let monkey_patched_attributes =
+            if let Some(monkey_patched_attributes) = monkey_patched_attributes {
+                MonkeyPatchedAttributesMap::from_entries(
+                    monkey_patched_attributes
+                        .inner
+                        .iter()
+                        .map(|(key, ty)| (key.as_str(), ty.as_str())),
+                )
+            } else {
+                monkey_patched_attributes_default
+            };
+
         AnalysisSettings {
             respect_type_ignore_comments: respect_type_ignore_comments
                 .unwrap_or(respect_type_ignore_default),
             allowed_unresolved_imports,
             replace_imports_with_any,
+            names_to_types,
+            monkey_patched_attributes,
         }
     }
+}
+
+/// Raw `[tool.ty.analysis.names-to-types]` mapping from a TOML configuration.
+#[derive(
+    Debug, Default, Clone, Eq, PartialEq, Hash, Combine, Serialize, Deserialize, get_size2::GetSize,
+)]
+#[serde(transparent)]
+pub struct NamesToTypes {
+    inner: OrderMap<RangedValue<String>, RangedValue<String>, BuildHasherDefault<FxHasher>>,
+}
+
+impl FromIterator<(RangedValue<String>, RangedValue<String>)> for NamesToTypes {
+    fn from_iter<T: IntoIterator<Item = (RangedValue<String>, RangedValue<String>)>>(
+        iter: T,
+    ) -> Self {
+        Self {
+            inner: iter.into_iter().collect(),
+        }
+    }
+}
+
+/// Raw `[tool.ty.analysis.monkey-patched-attributes]` mapping from a TOML
+/// configuration. Keys are `module.path.Class.attr` strings.
+#[derive(
+    Debug, Default, Clone, Eq, PartialEq, Hash, Combine, Serialize, Deserialize, get_size2::GetSize,
+)]
+#[serde(transparent)]
+pub struct MonkeyPatchedAttributes {
+    inner: OrderMap<RangedValue<String>, RangedValue<String>, BuildHasherDefault<FxHasher>>,
+}
+
+impl FromIterator<(RangedValue<String>, RangedValue<String>)> for MonkeyPatchedAttributes {
+    fn from_iter<T: IntoIterator<Item = (RangedValue<String>, RangedValue<String>)>>(
+        iter: T,
+    ) -> Self {
+        Self {
+            inner: iter.into_iter().collect(),
+        }
+    }
+}
+
+/// Validate `monkey-patched-attributes` entries by resolving each entry's class
+/// path (the key, minus its last segment) and type path (the value). Returns a
+/// warning for every path that cannot be resolved, since such an entry is
+/// silently ignored and the configured attribute keeps reporting
+/// `unresolved-attribute`.
+///
+/// This must run *after* the [`Program`] is initialized (i.e. at check time):
+/// at config-load time the search paths are not yet set up, so every path would
+/// appear unresolvable.
+pub(crate) fn validate_monkey_patched_attributes(
+    db: &dyn Db,
+    attributes: &MonkeyPatchedAttributes,
+) -> Vec<OptionDiagnostic> {
+    const OPTION_NAME: &str = "monkey-patched-attributes";
+
+    let mut diagnostics = Vec::new();
+    for (key, value) in &attributes.inner {
+        // The key has the form `module.path.Class.attr`; everything before the
+        // last `.` is the class path. Entries without a `.` cannot name a class
+        // and are dropped when building the map, so skip them here too.
+        if let Some((class_path, _attr)) = key.rsplit_once('.')
+            && !class_path.is_empty()
+            && !dotted_path_resolves(db, class_path)
+        {
+            diagnostics.push(
+                OptionDiagnostic::new(
+                    DiagnosticId::InvalidMonkeyPatchedAttribute,
+                    format!("Class `{class_path}` could not be resolved"),
+                    Severity::Warning,
+                )
+                .with_source_sub(
+                    db,
+                    key,
+                    "class path",
+                    OPTION_NAME,
+                    "use a fully-qualified path like `package.module.Class.attribute`; \
+                     only a bare name resolves against `builtins`",
+                ),
+            );
+        }
+
+        if !config_type_resolves(db, value) {
+            diagnostics.push(
+                OptionDiagnostic::new(
+                    DiagnosticId::InvalidMonkeyPatchedAttribute,
+                    format!("Type `{}` could not be resolved", &**value),
+                    Severity::Warning,
+                )
+                .with_source_sub(
+                    db,
+                    value,
+                    "type path",
+                    OPTION_NAME,
+                    "expected a dotted path to a class or a `Callable[[...], ...]`; \
+                     a bare name resolves against `builtins`",
+                ),
+            );
+        }
+    }
+    diagnostics
 }
 
 fn build_module_glob_set(
@@ -1990,6 +2177,36 @@ impl std::error::Error for ToSettingsError {}
 
 #[cfg(feature = "schemars")]
 mod schema {
+    impl schemars::JsonSchema for super::NamesToTypes {
+        fn schema_name() -> std::borrow::Cow<'static, str> {
+            std::borrow::Cow::Borrowed("NamesToTypes")
+        }
+
+        fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+            let value_schema = generator.subschema_for::<String>();
+            let mut schema = schemars::json_schema!({ "type": "object" });
+            schema
+                .ensure_object()
+                .insert("additionalProperties".to_string(), value_schema.into());
+            schema
+        }
+    }
+
+    impl schemars::JsonSchema for super::MonkeyPatchedAttributes {
+        fn schema_name() -> std::borrow::Cow<'static, str> {
+            std::borrow::Cow::Borrowed("MonkeyPatchedAttributes")
+        }
+
+        fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+            let value_schema = generator.subschema_for::<String>();
+            let mut schema = schemars::json_schema!({ "type": "object" });
+            schema
+                .ensure_object()
+                .insert("additionalProperties".to_string(), value_schema.into());
+            schema
+        }
+    }
+
     impl schemars::JsonSchema for super::Rules {
         fn schema_name() -> std::borrow::Cow<'static, str> {
             std::borrow::Cow::Borrowed("Rules")

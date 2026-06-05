@@ -16,6 +16,10 @@ license.workspace = true
 [lib]
 doctest = false
 
+[[bin]]
+name = "ty-semantic"
+path = "src/main.rs"
+
 [dependencies]
 ruff_db = { workspace = true, features = ["os", "cache", "junit"] }
 ruff_diagnostics = { workspace = true }

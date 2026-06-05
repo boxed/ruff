@@ -51,6 +51,8 @@ mod db;
 mod dunder_all;
 mod fixes;
 pub mod lint;
+pub mod monkey_patched_attributes;
+pub mod names_to_types;
 pub(crate) mod place;
 mod reachability;
 mod semantic_model;
@@ -101,6 +103,17 @@ pub struct AnalysisSettings {
     pub allowed_unresolved_imports: ModuleGlobSet,
 
     pub replace_imports_with_any: ModuleGlobSet,
+
+    /// Implicit `name -> Type` mapping that applies to unannotated bindings,
+    /// unannotated parameters, and attribute accesses. Configured under
+    /// `[tool.ty.analysis.names-to-types]` in `pyproject.toml` / `ty.toml`.
+    pub names_to_types: names_to_types::NamesToTypesMap,
+
+    /// Per-class `attribute -> Type` mapping for attributes that were added to
+    /// a class at runtime (e.g. by monkey patching). Configured under
+    /// `[tool.ty.analysis.monkey-patched-attributes]` in `pyproject.toml` /
+    /// `ty.toml`.
+    pub monkey_patched_attributes: monkey_patched_attributes::MonkeyPatchedAttributesMap,
 }
 
 impl Default for AnalysisSettings {
@@ -109,6 +122,9 @@ impl Default for AnalysisSettings {
             respect_type_ignore_comments: true,
             allowed_unresolved_imports: ModuleGlobSet::empty(),
             replace_imports_with_any: ModuleGlobSet::empty(),
+            names_to_types: names_to_types::NamesToTypesMap::default(),
+            monkey_patched_attributes:
+                monkey_patched_attributes::MonkeyPatchedAttributesMap::default(),
         }
     }
 }

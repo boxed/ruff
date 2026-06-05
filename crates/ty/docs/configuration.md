@@ -81,6 +81,93 @@ any module where the first component contains the substring `test`, use `*test*.
 
 ---
 
+### `monkey-patched-attributes`
+
+Per-class attribute type declarations for attributes that exist at
+runtime but are not visible to the type checker (e.g. attributes
+installed by a framework or by an explicit monkey patch).
+
+Each key has the form `module.path.Class.attribute`; the last segment
+is the attribute name and the prefix is the dotted path to the class
+(use a bare class name for builtins, e.g. `int.is_super_cool`).
+
+Each value is a type expression. Usually it is a dotted path to a class
+(the resolved type is its *instance* type), but it may also be a
+`Callable[[ArgType, ...], ReturnType]` — handy for methods that are
+monkey-patched in. `typing.Callable`, `collections.abc.Callable`, and a
+bare `Callable` are all accepted, as is the gradual `Callable[..., R]`.
+
+When ty resolves `obj.attribute` and `obj` is an instance of the named
+class (or a subclass), or the class object itself, the configured type
+wins over the normal lookup; no `unresolved-attribute` diagnostic is
+emitted even if the attribute is not declared on the class.
+
+**Default value**: `{}`
+
+**Type**: `dict[str, str]`
+
+**Example usage**:
+
+=== "pyproject.toml"
+
+    ```toml
+    [tool.ty.analysis.monkey-patched-attributes]
+    "django.http.HttpRequest.user" = "mypkg.User"
+    "django.contrib.auth.models.AnonymousUser.has_group" = "typing.Callable[[str], bool]"
+    ```
+
+=== "ty.toml"
+
+    ```toml
+    [analysis.monkey-patched-attributes]
+    "django.http.HttpRequest.user" = "mypkg.User"
+    "django.contrib.auth.models.AnonymousUser.has_group" = "typing.Callable[[str], bool]"
+    ```
+
+---
+
+### `names-to-types`
+
+Implicit `name -> Type` mapping that declares the type of unannotated
+names. When set, ty treats `name = value` as if the user had written
+`name: Type = value`. The mapping also applies to unannotated function
+and lambda parameters and to attribute accesses.
+
+Each value is a dotted path to a class. A bare name resolves against
+`builtins` (so `n = "int"` is equivalent to `n = "builtins.int"`).
+
+See `docs/names-to-types.md` for the full specification.
+
+**Default value**: `{}`
+
+**Type**: `dict[str, str]`
+
+**Example usage**:
+
+=== "pyproject.toml"
+
+    ```toml
+    [tool.ty.analysis]
+    # Override framework stubs by declaring that `user` is always our `User`,
+    # and `count` is always an `int`.
+    [tool.ty.analysis.names-to-types]
+    user = "mypkg.User"
+    count = "builtins.int"
+    ```
+
+=== "ty.toml"
+
+    ```toml
+    [analysis]
+    # Override framework stubs by declaring that `user` is always our `User`,
+    # and `count` is always an `int`.
+    [analysis.names-to-types]
+    user = "mypkg.User"
+    count = "builtins.int"
+    ```
+
+---
+
 ### `replace-imports-with-any`
 
 A list of module glob patterns whose imports should be replaced with `typing.Any`.
@@ -567,6 +654,95 @@ any module where the first component contains the substring `test`, use `*test*.
     [overrides.analysis]
     # Suppress errors for all `test` modules except `test.foo`
     allowed-unresolved-imports = ["test.**", "!test.foo"]
+    ```
+
+---
+
+#### `monkey-patched-attributes`
+
+Per-class attribute type declarations for attributes that exist at
+runtime but are not visible to the type checker (e.g. attributes
+installed by a framework or by an explicit monkey patch).
+
+Each key has the form `module.path.Class.attribute`; the last segment
+is the attribute name and the prefix is the dotted path to the class
+(use a bare class name for builtins, e.g. `int.is_super_cool`).
+
+Each value is a type expression. Usually it is a dotted path to a class
+(the resolved type is its *instance* type), but it may also be a
+`Callable[[ArgType, ...], ReturnType]` — handy for methods that are
+monkey-patched in. `typing.Callable`, `collections.abc.Callable`, and a
+bare `Callable` are all accepted, as is the gradual `Callable[..., R]`.
+
+When ty resolves `obj.attribute` and `obj` is an instance of the named
+class (or a subclass), or the class object itself, the configured type
+wins over the normal lookup; no `unresolved-attribute` diagnostic is
+emitted even if the attribute is not declared on the class.
+
+**Default value**: `{}`
+
+**Type**: `dict[str, str]`
+
+**Example usage**:
+
+=== "pyproject.toml"
+
+    ```toml
+    [tool.ty.overrides.analysis]
+    [tool.ty.analysis.monkey-patched-attributes]
+    "django.http.HttpRequest.user" = "mypkg.User"
+    "django.contrib.auth.models.AnonymousUser.has_group" = "typing.Callable[[str], bool]"
+    ```
+
+=== "ty.toml"
+
+    ```toml
+    [overrides.analysis]
+    [analysis.monkey-patched-attributes]
+    "django.http.HttpRequest.user" = "mypkg.User"
+    "django.contrib.auth.models.AnonymousUser.has_group" = "typing.Callable[[str], bool]"
+    ```
+
+---
+
+#### `names-to-types`
+
+Implicit `name -> Type` mapping that declares the type of unannotated
+names. When set, ty treats `name = value` as if the user had written
+`name: Type = value`. The mapping also applies to unannotated function
+and lambda parameters and to attribute accesses.
+
+Each value is a dotted path to a class. A bare name resolves against
+`builtins` (so `n = "int"` is equivalent to `n = "builtins.int"`).
+
+See `docs/names-to-types.md` for the full specification.
+
+**Default value**: `{}`
+
+**Type**: `dict[str, str]`
+
+**Example usage**:
+
+=== "pyproject.toml"
+
+    ```toml
+    [tool.ty.overrides.analysis]
+    # Override framework stubs by declaring that `user` is always our `User`,
+    # and `count` is always an `int`.
+    [tool.ty.analysis.names-to-types]
+    user = "mypkg.User"
+    count = "builtins.int"
+    ```
+
+=== "ty.toml"
+
+    ```toml
+    [overrides.analysis]
+    # Override framework stubs by declaring that `user` is always our `User`,
+    # and `count` is always an `int`.
+    [analysis.names-to-types]
+    user = "mypkg.User"
+    count = "builtins.int"
     ```
 
 ---

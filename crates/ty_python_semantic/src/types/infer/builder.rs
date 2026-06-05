@@ -18,7 +18,7 @@ use ruff_text_size::{Ranged, TextRange};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use strum::IntoEnumIterator;
-use ty_module_resolver::{KnownModule, ModuleName, resolve_module};
+use ty_module_resolver::{KnownModule, ModuleName, file_to_module, resolve_module};
 use ty_python_core::ast_ids::HasScopedUseId;
 use ty_python_core::statement::StatementInner;
 
@@ -29,6 +29,8 @@ use super::{
     infer_same_file_expression_type, infer_unpack_types,
 };
 use crate::diagnostic::format_enumeration;
+use crate::monkey_patched_attributes::resolve_monkey_patched_attribute;
+use crate::names_to_types::resolve_implicit_declared_type;
 use crate::place::{
     ConsideredDefinitions, DefinedPlace, Definedness, LookupError, Place, PlaceAndQualifiers,
     TypeOrigin, builtins_module_scope, builtins_symbol, class_body_implicit_symbol,
@@ -42,6 +44,7 @@ use crate::types::call::bind::MatchingOverloadIndex;
 use crate::types::call::{Binding, Bindings, CallArguments, CallError, CallErrorKind};
 use crate::types::callable::CallableTypeKind;
 use crate::types::class::{ClassLiteral, CodeGeneratorKind, MethodDecorator};
+use crate::types::class_base::ClassBase;
 use crate::types::constraints::{ConstraintSetBuilder, PathBounds, Solutions};
 use crate::types::context::InferContext;
 use crate::types::diagnostic::{
@@ -173,6 +176,20 @@ fn should_preserve_inferred_binding_type(ty: Type<'_>) -> bool {
     // Dataclass field specifiers carry metadata in the inferred RHS type; replacing it with the
     // declared field type would lose settings like `init=False`.
     matches!(ty, Type::KnownInstance(KnownInstanceType::Field(_)))
+}
+
+fn is_variadic_parameter_definition(kind: &DefinitionKind<'_>) -> bool {
+    matches!(
+        kind,
+        DefinitionKind::Parameter(
+            ParameterDefinitionNodeKind::VariadicPositionalParameter(_)
+                | ParameterDefinitionNodeKind::VariadicKeywordParameter(_),
+        ) | DefinitionKind::LambdaParameter(LambdaParameterDefinitionNodeKind {
+            parameter: ParameterDefinitionNodeKind::VariadicPositionalParameter(_)
+                | ParameterDefinitionNodeKind::VariadicKeywordParameter(_),
+            ..
+        })
+    )
 }
 
 /// We currently store one dataclass field-specifiers inline, because that covers standard
@@ -1216,7 +1233,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
 
         // If the place is unbound and its an attribute or subscript place, fall back to normal
         // attribute/subscript inference on the root type.
-        let declared_ty =
+        let mut declared_ty =
             if resolved_place.is_undefined() && !place_table.place(place_id).is_symbol() {
                 if let AnyNodeRef::ExprAttribute(ast::ExprAttribute { value, attr, .. }) = node {
                     let value_type =
@@ -1249,12 +1266,32 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             }
             .or_else(|| resolved_place.ignore_possibly_undefined());
 
+        // If there is still no declared type, fall back to the project's
+        // `[tool.ty.analysis.names-to-types]` mapping (if any). This implements
+        // the "implicit declared type" feature: configuring `foo = "mypkg.Foo"`
+        // makes `foo = ...` behave as if it had been written `foo: Foo = ...`.
+        //
+        // Variadic parameters (`*args`, `**kwargs`) are skipped: their symbol
+        // names refer to a tuple / dict at runtime, not to a single value of
+        // the mapped type.
+        let mut implicit_declared = false;
+        if declared_ty.is_none()
+            && !is_variadic_parameter_definition(binding.kind(db))
+            && let PlaceExprRef::Symbol(symbol) = place_table.place(place_id)
+            && let Some(implicit_ty) =
+                resolve_implicit_declared_type(self.db(), self.file(), symbol.name().as_str())
+        {
+            declared_ty = Some(implicit_ty);
+            implicit_declared = true;
+        }
+
         AddBinding {
             declared_ty,
             binding,
             node,
             qualifiers,
             is_local,
+            implicit_declared,
         }
     }
 
@@ -2328,6 +2365,41 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
                 }
                 assignable
             };
+
+        // If a `monkey-patched-attributes` entry applies, validate the value
+        // against the configured type. This bypasses the normal lookup (and
+        // any `unresolved-attribute` diagnostic) so monkey-patching the
+        // attribute is accepted by ty.
+        if let Some(write_ty) =
+            resolve_monkey_patched_attribute(db, self.file(), object_ty, attribute)
+        {
+            let value_ty = infer_value_ty(self, TypeContext::new(Some(write_ty)));
+            if value_ty.is_assignable_to(db, write_ty) {
+                return true;
+            }
+            // Assigning a function onto the *class object* installs a method:
+            // when later accessed on an instance, its first parameter (`self`)
+            // is bound. So also accept the value if its method-bound form (with
+            // `self` stripped) matches the configured instance-side type — e.g.
+            // `AnonymousUser.is_team_lead = lambda self: False` against a
+            // configured `() -> bool`.
+            if object_ty.to_class_type(db).is_some()
+                && let Type::Callable(callable) = value_ty
+                && Type::Callable(callable.bind_self(db, None)).is_assignable_to(db, write_ty)
+            {
+                return true;
+            }
+            if emit_diagnostics {
+                report_invalid_attribute_assignment(
+                    &self.context,
+                    target.into(),
+                    write_ty,
+                    value_ty,
+                    attribute,
+                );
+            }
+            return false;
+        }
 
         // For dataclass fields with converters, the write type is the converter's
         // input type (the type of the first positional parameter), not the field's
@@ -8690,6 +8762,16 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             value_type = Type::TypeVar(bound_typevar);
         }
 
+        // If a `monkey-patched-attributes` entry applies to this receiver and
+        // attribute, return its configured type immediately. This bypasses the
+        // normal lookup (and any `unresolved-attribute` diagnostic) since the
+        // user has explicitly declared that the attribute exists at runtime.
+        if let Some(monkey_patched_ty) =
+            resolve_monkey_patched_attribute(db, self.file(), value_type, attr.id.as_str())
+        {
+            return monkey_patched_ty;
+        }
+
         let mut assigned_type = None;
         if let Some(place_expr) = PlaceExpr::try_from_expr(attribute) {
             let (resolved, keys) = self.infer_place_load(
@@ -8802,6 +8884,25 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
                                 }
                             }
                         }
+                        return fallback();
+                    }
+
+                    // iommi's `MainMenuMiddleware` adds `iommi_main_menu` to Django's
+                    // `HttpRequest` at runtime. Suppress the diagnostic for that specific
+                    // attribute on any `HttpRequest` (or subclass) instance.
+                    if attr_name == "iommi_main_menu"
+                        && let Type::NominalInstance(instance) = value_type
+                        && instance.class(db).iter_mro(db).any(|base| {
+                            if let ClassBase::Class(class) = base
+                                && class.name(db) == "HttpRequest"
+                            {
+                                file_to_module(db, class.class_literal(db).file(db))
+                                    .is_some_and(|m| m.name(db).as_str() == "django.http.request")
+                            } else {
+                                false
+                            }
+                        })
+                    {
                         return fallback();
                     }
 
@@ -8946,7 +9047,20 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
 
         // Even if we can obtain the attribute type based on the assignments, we still perform default type inference
         // (to report errors).
-        assigned_type.unwrap_or(resolved_type)
+        let final_type = assigned_type.unwrap_or(resolved_type);
+
+        // If the attribute name appears in the project's `names-to-types`
+        // mapping, the user has declared "this name is always this type" — so
+        // we override whatever the type checker resolved. This applies even
+        // when the receiver is a known type whose attribute has a different
+        // type (e.g. Django's `request.user: AbstractBaseUser | AnonymousUser`
+        // can be overridden with `user = "mypkg.User"`).
+        if let Some(implicit_ty) = resolve_implicit_declared_type(db, self.file(), attr.id.as_str())
+        {
+            return implicit_ty;
+        }
+
+        final_type
     }
 
     fn infer_attribute_expression(&mut self, attribute: &ast::ExprAttribute) -> Type<'db> {
@@ -10262,6 +10376,14 @@ struct AddBinding<'db, 'ast> {
     node: AnyNodeRef<'ast>,
     qualifiers: TypeQualifiers,
     is_local: bool,
+    /// `true` when [`declared_ty`] came from the project's `names-to-types`
+    /// mapping rather than an in-source declaration. In that case we widen the
+    /// bound type to match the declared type, so that the name's revealed type
+    /// matches what the mapping promised — analogous to writing
+    /// `name: T = ...` explicitly.
+    ///
+    /// [`declared_ty`]: AddBinding::declared_ty
+    implicit_declared: bool,
 }
 
 impl<'db, 'ast> AddBinding<'db, 'ast> {
@@ -10344,6 +10466,13 @@ impl<'db, 'ast> AddBinding<'db, 'ast> {
             );
 
             // Allow declarations to override inference in case of invalid assignment.
+            bound_ty = declared_ty;
+        } else if self.implicit_declared {
+            // For implicit declarations from `names-to-types`, widen the bound
+            // type to the declared type even when the value is assignable. This
+            // mirrors the behavior of an explicit `name: T = ...`: revealing the
+            // name's type later should show `T`, not the narrower literal type
+            // of the right-hand side.
             bound_ty = declared_ty;
         }
         // In the following cases, the bound type may not be the same as the RHS value type.
