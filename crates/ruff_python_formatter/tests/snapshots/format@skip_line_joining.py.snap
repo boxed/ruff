@@ -1,5 +1,6 @@
 ---
 source: crates/ruff_python_formatter/tests/fixtures.rs
+input_file: crates/ruff_python_formatter/resources/test/fixtures/ruff/skip_line_joining.py
 ---
 ## Input
 ```python
@@ -184,8 +185,9 @@ magic-trailing-comma       = Respect
 docstring-code             = Disabled
 docstring-code-line-width  = "dynamic"
 preview                    = Disabled
-target_version             = 3.10
+target_version             = 3.11
 source_type                = Python
+nested-string-quote-style  = alternating
 ```
 
 ```python
@@ -327,8 +329,9 @@ magic-trailing-comma       = Respect
 docstring-code             = Disabled
 docstring-code-line-width  = "dynamic"
 preview                    = Disabled
-target_version             = 3.10
+target_version             = 3.11
 source_type                = Python
+nested-string-quote-style  = alternating
 ```
 
 ```python
